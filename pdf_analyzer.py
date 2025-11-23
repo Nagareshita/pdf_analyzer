@@ -44,15 +44,15 @@ class PDFParserTab(QWidget):
 
         # コントロールパネル（横幅を狭く）
         self.control_panel = ControlPanel()
-        self.control_panel.setMaximumWidth(450)  # 最大幅を制限
+        # self.control_panel.setMaximumWidth(450)  # 最大幅制限を解除
         splitter.addWidget(self.control_panel)
 
         # 結果ビューアー
         self.result_viewer = ResultViewer()
         splitter.addWidget(self.result_viewer)
 
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 4)  # より大きな比率に
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3) 
 
         layout.addWidget(splitter)
     

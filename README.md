@@ -50,7 +50,7 @@ mamba create -n vlm python=3.12 -y
 作成した環境を有効化します。
 
 ```powershell
-mamba activate vlm
+conda activate vlm
 ```
 
 **確認:** プロンプトが `(vlm)` に変わっていればOKです。
@@ -62,7 +62,7 @@ mamba activate vlm
 **重要:** 先にPyTorchをmambaでインストールすることで、CUDA依存関係が正しく解決されます。
 
 ```powershell
-mamba install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
+mamba install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia -y
 ```
 
 **補足:**
@@ -100,7 +100,6 @@ uv --version
 プロジェクトのルートディレクトリ（`new`フォルダ）に移動し、`requirements.txt`からインストールします。
 
 ```powershell
-cd C:\git\RAG_system\new
 uv pip install -r requirements.txt
 ```
 

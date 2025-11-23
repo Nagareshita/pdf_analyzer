@@ -3,7 +3,7 @@
 from PySide6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFormLayout, QSpinBox, QCheckBox, QProgressBar, QFileDialog,
-    QLineEdit, QComboBox, QScrollArea, QWidget
+    QLineEdit, QComboBox, QScrollArea, QWidget, QGridLayout
 )
 from PySide6.QtCore import Signal, Qt
 from pathlib import Path
@@ -218,31 +218,64 @@ class ControlPanel(QGroupBox):
     def _create_pymupdf_group(self):
         """PyMuPDF4LLM 詳細設定（JSONスキーマ反映）"""
         group = QGroupBox("PyMuPDF4LLM 詳細")
-        layout = QFormLayout(group)
+        layout = QGridLayout(group)
 
         if not self.schema:
-            layout.addRow(QLabel("設定スキーマが見つかりませんでした (pdf_converter_setting.json)"))
+            layout.addWidget(QLabel("設定スキーマが見つかりませんでした (pdf_converter_setting.json)"), 0, 0)
             return group
 
-        def add_help(lbl: str):
-            help_label = QLabel(lbl)
-            help_label.setStyleSheet("color: #666;")
-            return help_label
+        # グリッド配置用のインデックス
+        row = 0
+        col = 0
+        
+        # Checkboxを2列で配置するためのリスト
+        checkbox_items = []
+        # その他のアイテム
+        other_items = []
 
         for item in self.schema.get("pymupdf4llm_params", []):
+            if item.get("ui") == "checkbox":
+                checkbox_items.append(item)
+            else:
+                other_items.append(item)
+
+        # 1. チェックボックスを先に配置 (2列)
+        for i, item in enumerate(checkbox_items):
             key = item.get("key")
-            label = item.get("label", key)
+            label_text = item.get("label", key)
+            default = item.get("default")
+            help_text = item.get("help")
+
+            w = QCheckBox(label_text)
+            w.setChecked(bool(default))
+            if help_text:
+                w.setToolTip(help_text)
+            
+            self.pymupdf_controls[key] = w
+            
+            # 2列配置
+            r = row + (i // 2)
+            c = i % 2
+            layout.addWidget(w, r, c)
+        
+        # 次の行へ
+        row += (len(checkbox_items) + 1) // 2
+
+        # 2. その他のコントロールを配置
+        for item in other_items:
+            key = item.get("key")
+            label_text = item.get("label", key)
             ui = item.get("ui")
             default = item.get("default")
             options = item.get("options", [])
             help_text = item.get("help")
 
+            lbl = QLabel(label_text + ":")
+            if help_text:
+                lbl.setToolTip(help_text)
+
             widget = None
-            if ui == "checkbox":
-                w = QCheckBox()
-                w.setChecked(bool(default))
-                widget = w
-            elif ui == "spin":
+            if ui == "spin":
                 w = QSpinBox()
                 w.setRange(int(item.get("min", 0)), int(item.get("max", 100000)))
                 w.setSingleStep(int(item.get("step", 1)))
@@ -266,11 +299,19 @@ class ControlPanel(QGroupBox):
                 if default is not None:
                     w.setText(str(default))
                 widget = w
+            
+            if help_text:
+                widget.setToolTip(help_text)
 
             self.pymupdf_controls[key] = widget
-            layout.addRow(label + ":", widget)
-            if help_text:
-                layout.addRow("", add_help(help_text))
+            
+            # ラベルとウィジェットを配置
+            # スピンボックスやコンボボックスは短くてもいいが、テキストボックスは長くしたい
+            # ここではシンプルに 1行1項目 (Label + Widget) とするが、
+            # スペース節約のため Label(row, 0) -> Widget(row, 1) の2列構成にする
+            layout.addWidget(lbl, row, 0)
+            layout.addWidget(widget, row, 1)
+            row += 1
 
         # 相互排他: write_images / embed_images
         def on_write_images_changed(state: bool):
