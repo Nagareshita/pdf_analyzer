@@ -3,6 +3,7 @@ __pycache__/
 *.py[codz]
 *$py.class
 *.safetensors
+*venv/
 # C extensions
 *.so
 
