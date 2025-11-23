@@ -1,0 +1,43 @@
+# PDF Parser Standalone (Python 3.12)
+# pdf_analyzer.py を単独で動作させるための最新近似の依存関係
+# CUDA 12.4対応のPyTorchをインストールするためのインデックスURL
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+
+# GUI Framework
+PySide6>=6.8.0.2
+
+# PDF Processing
+pymupdf>=1.24.12
+pymupdf4llm>=0.0.31
+
+# Image Processing (VLM Caption用)
+Pillow>=11.0.0
+openpyxl>=3.1.5
+
+# ML/AI Framework (VLM用)
+torch>=2.5.1
+torchvision>=0.20.1
+transformers>=4.46.2
+huggingface_hub>=0.26.2
+accelerate>=0.26.0
+tiktoken>=0.7.0
+einops>=0.8.0
+
+# Vector Database (optional - utils依存)
+qdrant-client>=1.12.0
+
+# Graph Processing (optional - utils依存)
+langgraph>=0.2.45
+typing-extensions>=4.12.2
+
+# Neo4j (optional - utils依存)
+neo4j>=5.25.0
+
+# Utilities
+numpy>=1.26.4
+requests>=2.32.3
+python-dotenv>=1.0.1
+
+# Development
+pytest>=8.3.3
