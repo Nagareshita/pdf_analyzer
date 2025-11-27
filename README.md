@@ -84,7 +84,7 @@ mamba install pytorch torchvision cpuonly
 パッケージ管理ツール `uv` をインストールします（高速なpip代替ツール）。
 
 ```powershell
-pip install U pip
+pip install uv
 ```
 
 **確認:**
