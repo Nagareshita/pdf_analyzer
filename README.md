@@ -62,7 +62,7 @@ conda activate vlm
 **重要:** 先にPyTorchをmambaでインストールすることで、CUDA依存関係が正しく解決されます。
 
 ```powershell
-mamba install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia -y
+mamba install "pytorch=*=*cuda*"  -y
 ```
 
 **補足:**
@@ -74,7 +74,7 @@ mamba install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvi
 **CPU版の場合（GPU不要・動作遅い）:**
 
 ```powershell
-mamba install pytorch torchvision torchaudio cpuonly -c pytorch
+mamba install pytorch torchvision cpuonly
 ```
 
 ---
