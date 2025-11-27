@@ -112,14 +112,20 @@ class ModelManager:
                 progress_callback("モデルの確認中...")
             self._download_model_if_needed()
             
-            # ステップ2: 設定修正
+            # ステップ2: キャッシュクリア（古い設定を削除）
+            if progress_callback:
+                progress_callback("キャッシュをクリア中...")
+            self._clear_cache()
+            
+            # ステップ3: 設定修正
             if progress_callback:
                 progress_callback("設定ファイルの修正中...")
             self._fix_config()
+            self._patch_configuration_sailvl()
+            self._patch_processing_sailvl()
             self._patch_modeling_qwen3()
-            self._clear_cache()
             
-            # ステップ3: モデル読み込み
+            # ステップ4: モデル読み込み
             if progress_callback:
                 progress_callback("トークナイザーを読み込み中...")
             self._load_tokenizer()
@@ -147,28 +153,54 @@ class ModelManager:
         """必要に応じてモデルをダウンロード（safetensors欠損も検知して再取得）"""
         required_files = ["config.json", "tokenizer.json"]
 
-        def has_weights(path: Path) -> bool:
-            if (path / "model.safetensors.index.json").exists():
-                return True
+        def has_all_weights(path: Path) -> bool:
+            """モデルウェイトファイルが完全に揃っているか確認"""
+            index_file = path / "model.safetensors.index.json"
+            
+            # インデックスファイルが存在する場合、参照されているファイルを確認
+            if index_file.exists():
+                try:
+                    with open(index_file, "r", encoding="utf-8") as f:
+                        index_data = json.load(f)
+                    
+                    # weight_mapから必要なファイルリストを取得
+                    if "weight_map" in index_data:
+                        required_weight_files = set(index_data["weight_map"].values())
+                        
+                        # すべてのファイルが存在するか確認
+                        for weight_file in required_weight_files:
+                            if not (path / weight_file).exists():
+                                print(f"⚠️ 欠損ファイル検出: {weight_file}")
+                                return False
+                        
+                        print(f"✅ すべてのモデルファイル ({len(required_weight_files)}個) を確認")
+                        return True
+                except Exception as e:
+                    print(f"⚠️ インデックスファイル読み込みエラー: {e}")
+                    return False
+            
+            # インデックスファイルがない場合は単一ファイルを探す
             return any(path.glob("*.safetensors"))
 
         is_downloaded = (
             self.model_path.exists()
             and all((self.model_path / f).exists() for f in required_files)
-            and has_weights(self.model_path)
+            and has_all_weights(self.model_path)
         )
 
         if not is_downloaded:
-            print("モデルをダウンロードしています... (safetensorsを含めて取得)")
+            print("📥 モデルをダウンロードしています... (約4GB、数分かかります)")
+            print(f"保存先: {self.model_path}")
             snapshot_download(
                 repo_id="BytedanceDouyinContent/SAIL-VL2-2B",
                 repo_type="model",
                 local_dir=str(self.model_path),
                 local_dir_use_symlinks=False,
             )
+            print("✅ ダウンロード完了")
     
     def _fix_config(self):
-        """config.jsonのFlash Attention設定を修正"""
+        """config.jsonのFlash Attention設定とアーキテクチャ名を修正"""
         config_path = self.model_path / "config.json"
         
         with open(config_path, "r", encoding="utf-8") as f:
@@ -176,6 +208,7 @@ class ModelManager:
         
         modified = False
         
+        # Flash Attention → SDPA
         if config.get("_attn_implementation") == "flash_attention_2":
             config["_attn_implementation"] = "sdpa"
             modified = True
@@ -184,9 +217,95 @@ class ModelManager:
             config["llm_config"]["attn_implementation"] = "sdpa"
             modified = True
         
+        # Qwen2ForCausalLM → Qwen3ForCausalLM (transformers 4.57.3対応)
+        if "llm_config" in config and "architectures" in config["llm_config"]:
+            if "Qwen2ForCausalLM" in config["llm_config"]["architectures"]:
+                config["llm_config"]["architectures"] = ["Qwen3ForCausalLM"]
+                modified = True
+                print("✅ アーキテクチャ名を Qwen3ForCausalLM に修正")
+        
         if modified:
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
+    
+    def _patch_configuration_sailvl(self):
+        """configuration_sailvl.pyのQwen2→Qwen3対応パッチ"""
+        config_file = self.model_path / "configuration_sailvl.py"
+        
+        if not config_file.exists():
+            return
+        
+        with open(config_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        modified = False
+        
+        # デフォルト値を修正
+        if "'Qwen2ForCausalLM'" in content:
+            content = content.replace(
+                "llm_config = {'architectures': ['Qwen2ForCausalLM']}",
+                "llm_config = {'architectures': ['Qwen3ForCausalLM']}"
+            )
+            modified = True
+        
+        # 条件分岐にQwen2ForCausalLMのサポートを追加
+        old_condition = """        if llm_config['architectures'][0] == 'LlamaForCausalLM':
+            self.llm_config = LlamaConfig(**llm_config)
+        elif llm_config['architectures'][0] == 'Qwen3ForCausalLM':
+            self.llm_config = Qwen3Config(**llm_config)
+        else:
+            raise ValueError('Unsupported architecture: {}'.format(llm_config['architectures'][0]))"""
+        
+        new_condition = """        if llm_config['architectures'][0] == 'LlamaForCausalLM':
+            self.llm_config = LlamaConfig(**llm_config)
+        elif llm_config['architectures'][0] in ['Qwen2ForCausalLM', 'Qwen3ForCausalLM']:
+            self.llm_config = Qwen3Config(**llm_config)
+        else:
+            raise ValueError('Unsupported architecture: {}'.format(llm_config['architectures'][0]))"""
+        
+        if old_condition in content:
+            content = content.replace(old_condition, new_condition)
+            modified = True
+        
+        if modified:
+            with open(config_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("✅ configuration_sailvl.py を Qwen3 対応にパッチ適用")
+    
+    def _patch_processing_sailvl(self):
+        """processing_sailvl.pyのtransformers 4.57.3互換性パッチ"""
+        processing_file = self.model_path / "processing_sailvl.py"
+        
+        if not processing_file.exists():
+            return
+        
+        with open(processing_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        modified = False
+        
+        # _validate_images_text_input_orderのimportを削除
+        old_import = "from transformers.processing_utils import ProcessingKwargs, ProcessorMixin, Unpack, _validate_images_text_input_order"
+        new_import = "from transformers.processing_utils import ProcessingKwargs, ProcessorMixin, Unpack"
+        
+        if old_import in content:
+            content = content.replace(old_import, new_import)
+            modified = True
+        
+        # _validate_images_text_input_order関数を自前実装に置き換え
+        old_validation = "        images, text = _validate_images_text_input_order(images, text)"
+        new_validation = """        # Backward compatibility: transformers 4.57.3では不要
+        # 引数の順序検証は省略（通常は問題なし）
+        pass"""
+        
+        if old_validation in content:
+            content = content.replace(old_validation, new_validation)
+            modified = True
+        
+        if modified:
+            with open(processing_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("✅ processing_sailvl.py を transformers 4.57.3 対応にパッチ適用")
     
     def _patch_modeling_qwen3(self):
         """modeling_qwen3.pyをNVIDIA GPU対応に修正"""
@@ -198,6 +317,27 @@ class ModelManager:
         with open(modeling_file, "r", encoding="utf-8") as f:
             content = f.read()
         
+        modified = False
+        
+        # LossKwargs import削除（transformers 4.57.3で廃止）
+        if "from transformers.utils import (\n    LossKwargs," in content:
+            content = content.replace(
+                "from transformers.utils import (\n    LossKwargs,",
+                "from transformers.utils import ("
+            )
+            modified = True
+            print("✅ modeling_qwen3.py から LossKwargs import を削除")
+        
+        # LossKwargsクラス継承を削除
+        if "class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ..." in content:
+            content = content.replace(
+                "class KwargsForCausalLM(FlashAttentionKwargs, LossKwargs): ...",
+                "class KwargsForCausalLM(FlashAttentionKwargs): ..."
+            )
+            modified = True
+            print("✅ modeling_qwen3.py から LossKwargs 継承を削除")
+        
+        # NVIDIA GPU対応パッチ
         if "torch_npu.npu_fusion_attention(" in content and "hasattr(torch, 'npu')" not in content:
             old_code = """    head_num = query.shape[1]
     attn_output = torch_npu.npu_fusion_attention(
@@ -240,7 +380,10 @@ class ModelManager:
     attn_output = attn_output.transpose(1, 2).contiguous()"""
             
             content = content.replace(old_code, new_code)
-            
+            modified = True
+            print("✅ modeling_qwen3.py に NVIDIA GPU 対応パッチを適用")
+        
+        if modified:
             with open(modeling_file, "w", encoding="utf-8") as f:
                 f.write(content)
     
@@ -252,12 +395,18 @@ class ModelManager:
             base_dir / "SAIL-VL2-2B",
             base_dir / "SAIL_hyphen_VL2_hyphen_2B",
         ]
+        cleared = False
         for cache_dir in candidates:
             try:
                 if cache_dir.exists():
                     shutil.rmtree(cache_dir)
+                    print(f"🗑️ キャッシュを削除: {cache_dir.name}")
+                    cleared = True
             except Exception as e:
                 print(f"⚠️ キャッシュ削除に失敗しました: {cache_dir} ({e})")
+        
+        if not cleared:
+            print("ℹ️ キャッシュは存在しません（初回実行またはクリーン状態）")
     
     def _load_tokenizer(self):
         """トークナイザーを読み込み"""
